@@ -30,16 +30,30 @@ jobs:
           path: source
           persist-credentials: false
 
-      - name: Validate and apply runtime Connect patches
+      - name: Apply runtime Connect transformations
         working-directory: source
         run: |
           set -euo pipefail
-          git apply --check ../automation/patches/connect-config-backend.patch
-          git apply --check ../automation/patches/connect-config-frontend.patch
+
           git apply --check ../automation/patches/connect-config-csp.patch
-          git apply ../automation/patches/connect-config-backend.patch
-          git apply ../automation/patches/connect-config-frontend.patch
           git apply ../automation/patches/connect-config-csp.patch
+
+          curl --fail --silent --show-error --location \
+            https://raw.githubusercontent.com/orangeboyChen/wealthfolio/7859f226d2d765e01862d6603f4e6870adffe022/scripts/apply-connect-config-patch.mjs \
+            --output /tmp/apply-connect-config-patch.mjs
+
+          echo "5ddbf8cfa5a865b29ce90eacf5783818f9dd5a180bb1a0a90b84121ce9e7602b  /tmp/apply-connect-config-patch.mjs" \
+            | sha256sum --check -
+
+          node /tmp/apply-connect-config-patch.mjs
+
+          sed -i 's# https://wealthfolio-connect.home.nowcent.cn:54443##g' apps/server/src/api.rs
+
+          if grep -n 'wealthfolio-connect\.home\.nowcent\.cn' apps/server/src/api.rs; then
+            echo "Unexpected hardcoded Connect origin remains in CSP." >&2
+            exit 1
+          fi
+
           git diff --check
           git diff --stat
 
