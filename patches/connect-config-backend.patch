@@ -1,5 +1,5 @@
 diff --git a/apps/server/src/api/connect.rs b/apps/server/src/api/connect.rs
-index f3728e81..f6f34479 100644
+index f3728e8..f6f3447 100644
 --- a/apps/server/src/api/connect.rs
 +++ b/apps/server/src/api/connect.rs
 @@ -151,6 +151,41 @@ fn token_lifecycle_config() -> Option<TokenLifecycleConfig> {
@@ -47,9 +47,9 @@ index f3728e81..f6f34479 100644
 @@ -1289,6 +1324,8 @@ async fn cancel_device_snapshot_upload(
  
  pub fn router() -> Router<Arc<AppState>> {
-     Router::new()
+     let router = Router::new()
 +        // Connect config (public, no auth required)
 +        .route("/connect/config", get(get_connect_config))
          // Session management
          .route("/connect/session", post(store_sync_session))
-         .route("/connect/session", delete(clear_sync_session))
+         .route("/connect/post-login-bootstrap", post(post_login_bootstrap))
