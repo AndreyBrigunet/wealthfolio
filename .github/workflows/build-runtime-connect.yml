@@ -1,0 +1,87 @@
+name: Build runtime Connect image
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  UPSTREAM_REF: v3.6.2
+  REGISTRY_IMAGE: ghcr.io/andreybrigunet/wealthfolio
+
+jobs:
+  build:
+    name: Build Wealthfolio v3.6.2 for TrueNAS
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out patch repository
+        uses: actions/checkout@v4
+        with:
+          path: automation
+          persist-credentials: false
+
+      - name: Check out official Wealthfolio release
+        uses: actions/checkout@v4
+        with:
+          repository: wealthfolio/wealthfolio
+          ref: ${{ env.UPSTREAM_REF }}
+          path: source
+          persist-credentials: false
+
+      - name: Validate and apply runtime Connect patches
+        working-directory: source
+        run: |
+          set -euo pipefail
+          git apply --check ../automation/patches/connect-config-backend.patch
+          git apply --check ../automation/patches/connect-config-frontend.patch
+          git apply --check ../automation/patches/connect-config-csp.patch
+          git apply ../automation/patches/connect-config-backend.patch
+          git apply ../automation/patches/connect-config-frontend.patch
+          git apply ../automation/patches/connect-config-csp.patch
+          git diff --check
+          git diff --stat
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: source
+          file: source/Dockerfile
+          platforms: linux/amd64
+          pull: true
+          push: true
+          tags: |
+            ${{ env.REGISTRY_IMAGE }}:3.6.2-runtime-connect
+            ${{ env.REGISTRY_IMAGE }}:runtime-connect
+          labels: |
+            org.opencontainers.image.title=Wealthfolio runtime Connect
+            org.opencontainers.image.source=https://github.com/wealthfolio/wealthfolio
+            org.opencontainers.image.version=3.6.2-runtime-connect
+          cache-from: type=gha,scope=wealthfolio-runtime-connect
+          cache-to: type=gha,mode=max,scope=wealthfolio-runtime-connect
+
+      - name: Write build summary
+        env:
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          {
+            echo "## Runtime Connect image published"
+            echo
+            echo "- Image: \`${REGISTRY_IMAGE}:3.6.2-runtime-connect\`"
+            echo "- Platform: \`linux/amd64\`"
+            echo "- Digest: \`${IMAGE_DIGEST}\`"
+            echo
+            echo "CONNECT_AUTH_URL, CONNECT_API_URL and CONNECT_AUTH_PUBLISHABLE_KEY are configured at runtime in TrueNAS."
+          } >> "${GITHUB_STEP_SUMMARY}"
