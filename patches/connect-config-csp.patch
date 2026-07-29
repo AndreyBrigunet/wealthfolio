@@ -1,0 +1,69 @@
+diff --git a/apps/server/src/api.rs b/apps/server/src/api.rs
+index c51a185..45c4b49 100644
+--- a/apps/server/src/api.rs
++++ b/apps/server/src/api.rs
+@@ -12,7 +12,7 @@ use axum::{
+     body::Body,
+     http::{
+         header::{HeaderName, HeaderValue},
+-        Request,
++        Request, Uri,
+     },
+     middleware::Next,
+     response::Response,
+@@ -87,18 +87,52 @@ pub struct ApiDoc;
+ const SERVER_CSP: &str = "default-src 'self'; script-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https://wealthfolio.app https://auth.wealthfolio.app https://connect.wealthfolio.app https://connect-staging.wealthfolio.app; frame-src 'self' blob: about:; child-src 'self' blob: about:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; worker-src 'self' blob:";
+ const ADDON_SANDBOX_CSP: &str = "default-src 'none'; script-src 'self' 'unsafe-inline' blob:; style-src 'self' 'unsafe-inline'; img-src data: blob:; font-src 'self' data: blob:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
+ 
++fn configured_connect_origin(name: &str) -> Option<String> {
++    let value = std::env::var(name).ok()?;
++    let uri = value.trim().parse::<Uri>().ok()?;
++    let scheme = uri.scheme_str()?;
++    if scheme != "http" && scheme != "https" {
++        return None;
++    }
++    let authority = uri.authority()?;
++
++    Some(format!("{scheme}://{authority}"))
++}
++
++fn server_csp_header_value() -> HeaderValue {
++    let mut origins = Vec::new();
++    for name in ["CONNECT_AUTH_URL", "CONNECT_API_URL"] {
++        if let Some(origin) = configured_connect_origin(name) {
++            if !origins.contains(&origin) {
++                origins.push(origin);
++            }
++        }
++    }
++
++    if origins.is_empty() {
++        return HeaderValue::from_static(SERVER_CSP);
++    }
++
++    let csp = SERVER_CSP.replacen(
++        "; frame-src",
++        &format!(" {}; frame-src", origins.join(" ")),
++        1,
++    );
++    HeaderValue::from_str(&csp).unwrap_or_else(|_| HeaderValue::from_static(SERVER_CSP))
++}
++
+ pub async fn security_headers(request: Request<Body>, next: Next) -> Response {
+     let path = request.uri().path().to_string();
+     let mut response = next.run(request).await;
+     let headers = response.headers_mut();
+     let csp = if path.ends_with("/addon-sandbox.html") {
+-        ADDON_SANDBOX_CSP
++        HeaderValue::from_static(ADDON_SANDBOX_CSP)
+     } else {
+-        SERVER_CSP
++        server_csp_header_value()
+     };
+     headers.insert(
+         HeaderName::from_static("content-security-policy"),
+-        HeaderValue::from_static(csp),
++        csp,
+     );
+     if !path.starts_with("/api/") && !path.starts_with("/mcp") {
+         headers.insert(
